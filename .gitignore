@@ -1,0 +1,34 @@
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# IDE
+.vscode/
+
+# Git
+.git/
+
+# Local databases and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Patient and test data
+uploads/
+data/
+test_data/
+synthetic_data/
+
+# Local files
+security_search_results.txt
+.DS_Store

@@ -1,0 +1,60 @@
+from enum import Enum
+
+class Role(str,Enum):
+    PROVIDER = "PROVIDER"
+    REVIEWER = "REVIEWER"
+    ADMIN = "ADMIN"
+
+class Permission(str,Enum):
+    CREATE_AUTHORIZATION = "CREATE_AUTHORIZATION"
+    UPLOAD_DOCUMENT = "UPLOAD_DOCUMENT"
+    VIEW_OWN_AUTHORIZATION = "VIEW_OWN_AUTHORIZATION"
+    SEARCH_POLICY = "SEARCH_POLICY"
+    INGEST_POLICY="INGEST_POLICY"
+    CREATE_MEMBER="CREATE_MEMBER"
+    VIEW_MEMBERS="VIEW_MEMBERS"
+    CREATE_MEMBER_COVERAGE="CREATE_MEMBER_COVERAGE"
+    VIEW_MEMBERS_COVERAGE="VIEW_MEMBERS_COVERAGE"
+
+    VIEW_QUEUE = "VIEW_QUEUE"
+    REVIEW_CASE = "REVIEW_CASE"
+    REQUEST_INFORMATION = "REQUEST_INFORMATION"
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+
+    MANAGE_USERS = "MANAGE_USERS"
+    MANAGE_ROLES = "MANAGE_ROLES"
+    MANAGE_POLICIES = "MANAGE_POLICIES"
+    VIEW_AUDIT = "VIEW_AUDIT"
+
+ROLE_PERMISSIONS={
+    Role.PROVIDER: {
+        Permission.CREATE_AUTHORIZATION,
+        Permission.UPLOAD_DOCUMENT,
+        Permission.VIEW_OWN_AUTHORIZATION,
+        Permission.SEARCH_POLICY,
+        Permission.CREATE_MEMBER,
+        Permission.VIEW_MEMBERS,
+        Permission.CREATE_MEMBER_COVERAGE,
+        Permission.VIEW_MEMBERS_COVERAGE,
+
+    },
+    Role.REVIEWER: {
+        Permission.VIEW_QUEUE,
+        Permission.REVIEW_CASE,
+        Permission.REQUEST_INFORMATION,
+        Permission.APPROVE,
+        Permission.REJECT,
+        Permission.SEARCH_POLICY,
+        Permission.VIEW_MEMBERS,
+        Permission.VIEW_MEMBERS_COVERAGE
+    },
+    Role.ADMIN: {
+        Permission.MANAGE_USERS,
+        Permission.MANAGE_ROLES,
+        Permission.MANAGE_POLICIES,
+        Permission.VIEW_AUDIT,
+        Permission.SEARCH_POLICY,
+        Permission.INGEST_POLICY
+    },
+}
