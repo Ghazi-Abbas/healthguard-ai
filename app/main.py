@@ -170,7 +170,7 @@ def health():
         "status":"healthy"
     }
 
-Base.metadata.create_all(bind=engine)
+
 
 # alembic revision --autogenerate -m "add phone to users"
 # alembic upgrade head
