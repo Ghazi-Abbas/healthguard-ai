@@ -1,18 +1,13 @@
 
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-
+from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 from app.db.base import Base
+from app.core.config import settings
 import app.models
 
-
-# ============================================================
-# ALEMBIC CONFIGURATION
-# ============================================================
 
 config = context.config
 
@@ -20,18 +15,8 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 
-# ============================================================
-# SQLALCHEMY MODEL METADATA
-# ============================================================
-
 target_metadata = Base.metadata
 
-
-# ============================================================
-# EXTERNAL TABLES
-# Tables managed outside application SQLAlchemy metadata.
-# Alembic must not propose dropping these tables.
-# ============================================================
 
 EXTERNAL_TABLES = {
     "checkpoints",
@@ -42,21 +27,7 @@ EXTERNAL_TABLES = {
 }
 
 
-def include_object(
-    object,
-    name,
-    type_,
-    reflected,
-    compare_to
-):
-    """
-    Exclude externally managed tables from Alembic
-    autogenerate comparison.
-
-    This protects LangGraph checkpoint tables and
-    the policy vector table.
-    """
-
+def include_object(object, name, type_, reflected, compare_to):
     if (
         type_ == "table"
         and reflected
@@ -67,13 +38,13 @@ def include_object(
     return True
 
 
-# ============================================================
-# OFFLINE MIGRATIONS
-# ============================================================
+def get_database_url():
+    """Get the database URL from application settings."""
+    return settings.DATABASE_URL
+
 
 def run_migrations_offline() -> None:
-
-    url = config.get_main_option("sqlalchemy.url")
+    url = get_database_url()
 
     context.configure(
         url=url,
@@ -88,20 +59,20 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-# ============================================================
-# ONLINE MIGRATIONS
-# ============================================================
-
 def run_migrations_online() -> None:
+    configuration = config.get_section(
+        config.config_ini_section
+    )
+
+    configuration["sqlalchemy.url"] = get_database_url()
 
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
 
     with connectable.connect() as connection:
-
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
@@ -112,10 +83,6 @@ def run_migrations_online() -> None:
         with context.begin_transaction():
             context.run_migrations()
 
-
-# ============================================================
-# MIGRATION ENTRY POINT
-# ============================================================
 
 if context.is_offline_mode():
     run_migrations_offline()
