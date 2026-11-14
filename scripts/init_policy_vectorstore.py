@@ -1,12 +1,22 @@
+
+import sys
+import asyncio
+
+# Apply this event-loop policy only on Windows.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(
+        asyncio.WindowsSelectorEventLoopPolicy()
+    )
+
 from langchain_postgres import Column, PGEngine
 
-from app.db.session import DATABASE_URL
+from app.core.config import settings
+from app.rag.constants import EMBIDDING_DIMENSION, POLICY_VECTOR_TABLE
 
-from app.rag.constants import EMBIDDING_DIMENSION , POLICY_VECTOR_TABLE
 
-def initialize_policy_vectorstore()->None:
-    engine=PGEngine.from_connection_string(
-        url=DATABASE_URL
+def initialize_policy_vectorstore() -> None:
+    engine = PGEngine.from_connection_string(
+        url=settings.DATABASE_URL
     )
 
     engine.init_vectorstore_table(
@@ -28,11 +38,6 @@ def initialize_policy_vectorstore()->None:
 
     print("Policy vector-store table initialized.")
 
+
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.set_event_loop_policy(
-        asyncio._WindowsSelectorEventLoopPolicy()
-    )
-
     initialize_policy_vectorstore()
