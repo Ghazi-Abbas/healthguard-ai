@@ -70,6 +70,8 @@ This is an independent portfolio engineering project. It is not an Optum product
 - [Policy RAG and C-RAG](#policy-rag-and-c-rag)
 - [Human-in-the-loop and checkpointing](#human-in-the-loop-and-checkpointing)
 - [Security and privacy](#security-and-privacy)
+  - [Role-based access control (RBAC)](#role-based-access-control-rbac)
+  - [HIPAA-oriented safeguards and PHI/PII protection](#hipaa-oriented-safeguards-and-phipii-protection)
 - [Technology stack](#technology-stack)
 - [Data model](#data-model)
 - [Repository structure](#repository-structure)
@@ -426,6 +428,121 @@ Security layers include:
 - Tenant-scoped policy retrieval.
 - Protected secrets and least-privilege cloud permissions.
 - Audit records for security-relevant actions and reviewer decisions.
+
+### Role-based access control (RBAC)
+
+HealthGuard AI defines three application roles — `PROVIDER`, `REVIEWER`, and `ADMIN` — and maps each role to an explicit set of permissions. The permission check should be performed server-side for every protected operation; hiding a button or endpoint in a frontend is not an authorization control.
+
+The following is the role/permission policy currently represented in the project's Python enums and `ROLE_PERMISSIONS` mapping:
+
+| Role | Granted permissions | Intended responsibility |
+|---|---|---|
+| `PROVIDER` | `CREATE_AUTHORIZATION`, `UPLOAD_DOCUMENT`, `VIEW_OWN_AUTHORIZATION`, `SEARCH_POLICY`, `CREATE_MEMBER`, `VIEW_MEMBERS`, `CREATE_MEMBER_COVERAGE`, `VIEW_MEMBERS_COVERAGE` | Create authorization requests, upload supporting documents, and view permitted member/coverage and own authorization information |
+| `REVIEWER` | `VIEW_QUEUE`, `REVIEW_CASE`, `REQUEST_INFORMATION`, `APPROVE`, `REJECT`, `SEARCH_POLICY`, `VIEW_MEMBERS`, `VIEW_MEMBERS_COVERAGE` | Review assigned/authorized cases, request information, and record review decisions |
+| `ADMIN` | `MANAGE_USERS`, `MANAGE_ROLES`, `MANAGE_POLICIES`, `VIEW_AUDIT`, `SEARCH_POLICY`, `INGEST_POLICY` | Manage users and roles, administer policy content, and inspect audit information |
+
+The permission constants are:
+
+```python
+from enum import Enum
+
+class Role(str, Enum):
+    PROVIDER = "PROVIDER"
+    REVIEWER = "REVIEWER"
+    ADMIN = "ADMIN"
+
+
+class Permission(str, Enum):
+    CREATE_AUTHORIZATION = "CREATE_AUTHORIZATION"
+    UPLOAD_DOCUMENT = "UPLOAD_DOCUMENT"
+    VIEW_OWN_AUTHORIZATION = "VIEW_OWN_AUTHORIZATION"
+    SEARCH_POLICY = "SEARCH_POLICY"
+    INGEST_POLICY = "INGEST_POLICY"
+    CREATE_MEMBER = "CREATE_MEMBER"
+    VIEW_MEMBERS = "VIEW_MEMBERS"
+    CREATE_MEMBER_COVERAGE = "CREATE_MEMBER_COVERAGE"
+    VIEW_MEMBERS_COVERAGE = "VIEW_MEMBERS_COVERAGE"
+
+    VIEW_QUEUE = "VIEW_QUEUE"
+    REVIEW_CASE = "REVIEW_CASE"
+    REQUEST_INFORMATION = "REQUEST_INFORMATION"
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+
+    MANAGE_USERS = "MANAGE_USERS"
+    MANAGE_ROLES = "MANAGE_ROLES"
+    MANAGE_POLICIES = "MANAGE_POLICIES"
+    VIEW_AUDIT = "VIEW_AUDIT"
+
+
+ROLE_PERMISSIONS = {
+    Role.PROVIDER: {
+        Permission.CREATE_AUTHORIZATION,
+        Permission.UPLOAD_DOCUMENT,
+        Permission.VIEW_OWN_AUTHORIZATION,
+        Permission.SEARCH_POLICY,
+        Permission.CREATE_MEMBER,
+        Permission.VIEW_MEMBERS,
+        Permission.CREATE_MEMBER_COVERAGE,
+        Permission.VIEW_MEMBERS_COVERAGE,
+    },
+    Role.REVIEWER: {
+        Permission.VIEW_QUEUE,
+        Permission.REVIEW_CASE,
+        Permission.REQUEST_INFORMATION,
+        Permission.APPROVE,
+        Permission.REJECT,
+        Permission.SEARCH_POLICY,
+        Permission.VIEW_MEMBERS,
+        Permission.VIEW_MEMBERS_COVERAGE,
+    },
+    Role.ADMIN: {
+        Permission.MANAGE_USERS,
+        Permission.MANAGE_ROLES,
+        Permission.MANAGE_POLICIES,
+        Permission.VIEW_AUDIT,
+        Permission.SEARCH_POLICY,
+        Permission.INGEST_POLICY,
+    },
+}
+```
+
+#### Permission enforcement expectations
+
+1. Authenticate the caller and resolve the user's role from trusted server-side identity/database state.
+2. Check that the role grants the required permission before executing the operation.
+3. Apply object-level and organization-level authorization after the permission check. For example, `VIEW_OWN_AUTHORIZATION` must also verify that the authorization belongs to the authenticated provider's permitted scope.
+4. Do not treat `VIEW_MEMBERS` or `VIEW_QUEUE` as permission to access every tenant's records. Tenant and resource ownership checks remain mandatory.
+5. Keep approval/rejection actions restricted to authorized reviewers and validate the workflow state before accepting a decision.
+6. Record security-relevant actions, especially role changes, policy ingestion, reviewer decisions, and denied access attempts, using privacy-conscious audit logging.
+7. Add negative tests proving that each role cannot perform actions outside its permission set.
+
+The mapping above documents the supplied application policy. It does not by itself prove that every API route enforces it; verify route dependencies, service checks, and tests for each operation. In particular, ensure that an administrator's policy-management permissions do not accidentally grant access to clinical records unless that access is explicitly required and authorized.
+
+### HIPAA-oriented safeguards and PHI/PII protection
+
+**HIPAA is a central security design consideration for HealthGuard AI, but this portfolio project must not be described as HIPAA certified or compliant.** The application is intended for synthetic healthcare data only. The controls below are engineering safeguards inspired by the need to protect the confidentiality, integrity, and availability of sensitive health information; they are not a substitute for a formal HIPAA Security Rule risk analysis, required policies and procedures, workforce training, business associate agreements, vendor review, or independent compliance assessment.
+
+The security design focuses on these protection boundaries:
+
+| Protection area | HealthGuard AI control / design intent |
+|---|---|
+| Identity and access | JWT authentication, explicit roles, permission checks, and organization-scoped authorization |
+| Minimum necessary access | Give each role only the permissions needed for its workflow; restrict each request to authorized resources |
+| PHI/PII identification | Classify incoming content and detect sensitive health/personal information before model processing |
+| Sanitization and redaction | Sanitize untrusted inputs and redact sensitive values according to configured rules before any permitted model call |
+| LLM/provider boundary | Do not pass the complete PHI-bearing authorization state to the hosted supervisor model; require a separate provider/task/data-class authorization check at each specialist model boundary |
+| Prompt-injection defense | Treat uploaded documents and retrieved passages as untrusted data, never as instructions that can override application policy |
+| Storage protection | Restrict document access through application authorization and protect storage credentials and cloud permissions |
+| Tenant isolation | Scope relational queries, vector retrieval, document access, cache entries, and workflow resume operations to trusted organization context |
+| Auditability | Record relevant access, workflow, and reviewer actions without unnecessarily copying sensitive document content into logs |
+| Human oversight | Route uncertain or exceptional cases to an authorized reviewer; AI output is advisory rather than final authorization authority |
+
+#### PHI-safe model invocation boundary
+
+The authorization state may contain PHI. The local deterministic supervisor uses trusted workflow state and predefined routing rules; it does not send the complete state to Groq. Specialist agents independently classify/minimize their inputs and validate provider authorization for the exact task and data class before invoking a model. If authorization fails, the call is blocked. A fallback model must pass the same checks independently.
+
+**Important wording:** the design goal is that raw patient records and the complete PHI-bearing authorization state are not sent directly to an LLM. Only minimum-necessary, processed inputs may be sent when the relevant provider/task/data-class authorization permits it. Detection, sanitization, and redaction are not infallible, so this is not a guarantee that sensitive information can never reach a model, trace, cache, log, or output.
 
 ### PHI-aware provider routing
 
@@ -1215,3 +1332,164 @@ This repository is maintained as a portfolio project. For a proposed change:
 ## License
 
 Add the license selected for this repository. Until a license is added, do not assume that the source code is licensed for reuse.
+
+
+---
+
+## Additional implementation details: PHI-safe orchestration, model gateway, and security testing
+
+This section adds implementation details about the model gateway and security modules. It supplements the architecture and security sections above; it does not replace the previously documented workflow, data model, deployment, or evaluation material.
+
+### PHI-bearing authorization state and deterministic supervisor
+
+An authorization workflow state can contain PHI and other sensitive member information. The supervisor therefore must not forward the complete authorization state to a hosted LLM.
+
+The PHI-safe orchestration design is:
+
+1. Authorization state remains inside the HealthGuard AI application and its controlled persistence layer.
+2. A **local deterministic supervisor** uses trusted workflow state, application rules, and predefined routing logic to decide which required stages run.
+3. The supervisor does not send the complete authorization state to Groq or another external model provider.
+4. Specialist agents receive only the minimum task-specific information needed for their work.
+5. Each specialist agent independently checks provider authorization and data classification before any model invocation.
+6. If the data/provider/task combination is not explicitly authorized, the model call is blocked before protected content is transmitted.
+7. Human review remains the authority for the final authorization decision.
+
+This is an intentional separation of deterministic orchestration from probabilistic model analysis. It also avoids treating a model-generated routing plan as a security boundary.
+
+```mermaid
+flowchart TD
+    A[Authorization state: may contain PHI] --> B[Application-controlled workflow state]
+    B --> C[Local deterministic supervisor]
+    C --> D[Trusted predefined routing rules]
+    D --> E[Specialist agent]
+    E --> F[Data classification and input sanitization]
+    F --> G{Provider authorized for task and data?}
+    G -->|No| H[Block model invocation]
+    G -->|Yes| I[Minimum necessary approved input]
+    I --> J[Authorized model provider]
+    J --> K[Validate and sanitize model output]
+    K --> L[Application workflow state]
+    L --> M[Human review when required]
+```
+
+**Important distinction:** “No patient record is sent directly to the LLM” means raw patient records and the complete PHI-bearing authorization state are not passed directly to an LLM. Any model input must pass the application's classification, sanitization/redaction, minimization, and provider-authorization controls first. Do not interpret this as a guarantee that every possible sensitive value is automatically removed; the actual behavior depends on the implemented classifiers, sanitizers, redaction rules, and tests.
+
+### Security gateway: classification, sanitization, and redaction
+
+The repository contains a security layer with modules for:
+
+- Data classification.
+- Input sanitization.
+- PHI detection.
+- PII detection.
+- Redaction.
+- Security validation and related policy checks.
+
+The gateway layer contains model gateway and provider-control components, including:
+
+- `model_factory.py` — model construction.
+- `model_registry.py` — configured model definitions and task/provider mapping.
+- `provider_authorization.py` — provider authorization checks.
+- `fallback_manager.py` — controlled model fallback behavior.
+- `retry_policy.py` — bounded retry behavior.
+- `mock_model.py` — model behavior for controlled tests.
+- `AI_GATEWAY.md` — gateway design/documentation.
+
+The intended security sequence is to classify the input, sanitize and redact where required, validate whether the selected provider is authorized for the task and data class, and only then invoke a model. Model output is validated before it is accepted into application state.
+
+A provider authorization check is not optional and must not be skipped by fallback logic. An alternative model is eligible only if it independently passes the same task/data authorization policy.
+
+### Model retry and fallback behavior
+
+The model gateway uses bounded retries and a configured fallback model path for recoverable model failures.
+
+The intended sequence is:
+
+1. Attempt the configured primary model.
+2. If a retryable error occurs, retry according to the configured retry policy.
+3. Allow at most **two retries** for the operation (up to three attempts total when the initial attempt is included).
+4. If the primary model still fails, ask the fallback manager to select the configured alternative model.
+5. Re-check provider authorization and data-class permissions for the fallback model before sending any input.
+6. Validate the fallback response using the same output schema and application-side checks.
+7. If the fallback is unavailable, unauthorized, or invalid, fail safely and route to the application's controlled error or human-review path.
+
+Retries should be limited to retryable failures such as transient provider errors or timeouts. They should not blindly repeat non-retryable authorization denials, invalid inputs, or security-policy violations. Retry and fallback attempts should be bounded and observable to avoid infinite loops and duplicate side effects.
+
+```mermaid
+flowchart TD
+    A[Prepare minimum necessary model input] --> B[Authorize primary provider]
+    B --> C{Authorized?}
+    C -->|No| Z[Block and return controlled failure]
+    C -->|Yes| D[Call primary model]
+    D --> E{Successful and valid?}
+    E -->|Yes| F[Accept validated result]
+    E -->|No| G{Retryable failure and retries remain?}
+    G -->|Yes| H[Retry primary model]
+    H --> D
+    G -->|No| I[Select configured fallback]
+    I --> J[Authorize fallback provider independently]
+    J --> K{Authorized?}
+    K -->|No| Z
+    K -->|Yes| L[Call fallback model]
+    L --> M{Response valid?}
+    M -->|Yes| F
+    M -->|No| N[Controlled failure / human review]
+```
+
+Fallback is a reliability mechanism, not a way to bypass provider restrictions. The primary and fallback providers must each be authorized for the exact task and data classification.
+
+### Security and model-gateway test coverage
+
+The repository screenshots show dedicated tests and scripts covering several security and reliability boundaries, including provider authorization, classification, sanitization, PHI/PII handling, redaction, prompt-injection-related controls, retry/fallback behavior, checkpoint recovery, document workflow failure/resume, and tenant isolation.
+
+Examples visible in the repository include:
+
+- `test_provider_authorization.py`
+- `test_central_provider_authorization.py`
+- `test_clinical_evidence_authorization.py`
+- `test_criteria_risk_authorization.py`
+- `test_policy_rag_provider_authorization.py`
+- `test_policy_crag_provider_authorization.py`
+- `test_supervisor_authorization.py`
+- `test_classification.py`
+- `test_data_classifier.py`
+- `test_input_sanitizer.py`
+- `test_document_logging.py`
+- `test_prompt_injection_security.py`
+- `test_tenant_isolation.py`
+- `test_fallback_manager.py`
+- `test_retry_policy.py`
+- `test_model_factory.py`
+- `test_model_relationships.py`
+- `test_authorization_hitl.py`
+- `test_checkpoint_resume.py`
+- `test_document_workflow_failure.py`
+- `test_document_workflow_resume.py`
+
+The project currently has **approximately 200 test cases**, according to the development test inventory. The exact number can change as tests are added, parameterized, or removed. Re-run the test suite on the release commit and report the actual collected and passed counts rather than treating “approximately 200” as a permanent test result.
+
+Suggested verification commands (use the paths that exist in the current checkout):
+
+```powershell
+# Full automated test suite
+python -m pytest -q
+
+# Security-focused tests
+python -m pytest tests/security -q
+
+# Model gateway / retry / fallback tests
+python -m pytest scripts/test_model_factory.py scripts/test_fallback_manager.py scripts/test_retry_policy.py -q
+
+# Provider authorization and AI-provider verification
+python -m pytest tests/security/test_provider_authorization.py -q
+python -m pytest scripts/verify_ai_providers.py -q
+```
+
+Some repository test files are under `scripts/` rather than `tests/`; use the exact paths present in the checkout. A test filename visible in the repository is evidence that a test exists, not evidence that it currently passes.
+
+### Security guarantees and limitations
+
+HealthGuard AI applies application-level controls intended to prevent unapproved provider calls and to minimize sensitive data exposure. The controls include classification, sanitization/redaction, provider authorization, bounded retries, independently authorized fallback, and human review.
+
+These controls are engineering safeguards, not a certification. They do not establish HIPAA compliance, guarantee perfect PHI/PII detection, or prove that no sensitive information can ever appear in model inputs, logs, traces, caches, or outputs. The project remains a synthetic-data-only portfolio system. Do not use real patient records or production PHI.
+
